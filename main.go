@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -14,7 +16,7 @@ import (
 
 const (
 	defaultConcurrency = 100
-	helpUsage          = "CIDR-Sensei -cidr=\"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16\" -concurrency=100"
+	helpUsage          = "CIDR-Sensei -cidr=\"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16\" -concurrency=100 -output json"
 )
 
 type CIDRRange struct {
@@ -46,22 +48,6 @@ func uint2ip(ip uint32) net.IP {
 	result := make(net.IP, 4)
 	binary.BigEndian.PutUint32(result, ip)
 	return result
-}
-
-func binarySearch(cidrRanges []CIDRRange, ip uint32) string {
-	left := 0
-	right := len(cidrRanges) - 1
-	for left <= right {
-		mid := (left + right) / 2
-		if ip < cidrRanges[mid].start {
-			right = mid - 1
-		} else if ip > cidrRanges[mid].end {
-			left = mid + 1
-		} else {
-			return cidrRanges[mid].ipNet.String()
-		}
-	}
-	return ""
 }
 
 func cidrToIPsParallel(cidrRanges []CIDRRange, concurrency int) ([]string, error) {
@@ -132,6 +118,22 @@ func cidrToIPsParallel(cidrRanges []CIDRRange, concurrency int) ([]string, error
 	return ips, nil
 }
 
+func binarySearch(cidrRanges []CIDRRange, ip uint32) string {
+	left := 0
+	right := len(cidrRanges) - 1
+	for left <= right {
+		mid := (left + right) / 2
+		if ip < cidrRanges[mid].start {
+			right = mid - 1
+		} else if ip > cidrRanges[mid].end {
+			left = mid + 1
+		} else {
+			return cidrRanges[mid].ipNet.String()
+		}
+	}
+	return ""
+}
+
 func cidrToIPs(cidrRanges []CIDRRange, parallel bool, concurrency int) ([]string, error) {
 	if parallel {
 		return cidrToIPsParallel(cidrRanges, concurrency)
@@ -166,10 +168,11 @@ func main() {
 	var cidrListStr string
 	var parallel bool
 	var concurrency int
+	var outputFormat string
 	flag.StringVar(&cidrListStr, "cidr", "", "a comma-separated list of CIDR blocks to expand into IPs")
 	flag.BoolVar(&parallel, "parallel", false, "enable parallel processing")
 	flag.IntVar(&concurrency, "concurrency", defaultConcurrency, "set the number of workers for parallel processing")
-
+	flag.StringVar(&outputFormat, "output", "terminal", "the output format (json, csv, or terminal)")
 	flag.Usage = func() {
 		fmt.Printf("Usage: %s [OPTIONS]\n", os.Args[0])
 		fmt.Println("Expand a comma-separated list of CIDR blocks into a list of IPs")
@@ -207,6 +210,69 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println(strings.Join(ips, "\n"))
+	switch outputFormat {
+	case "json":
+		filename := fmt.Sprintf("ip_%s_%s.json", strings.Replace(cidrListStr, "/", "-", -1), time.Now().Format("2006-01-02T15-04-05"))
+		err = outputJSON(ips, filename)
+		if err != nil {
+			fmt.Printf("Error writing JSON output to file: %v\n", err)
+		}
+	case "csv":
+		filename := fmt.Sprintf("ips_%s_%s.csv", strings.Replace(cidrListStr, "/", "-", -1), time.Now().Format("2006-01-02T15-04-05"))
+		err := outputCSV(ips, filename)
+		if err != nil {
+			fmt.Printf("Error writing CSV file: %v\n", err)
+		}
+	default:
+		outputTerminal(ips)
+	}
+
 	fmt.Printf("Took %v seconds to complete.\n", time.Since(startTime).Seconds())
+}
+
+func outputJSON(ips []string, filename string) error {
+	type IP struct {
+		Address string `json:"address"`
+	}
+	var data []IP
+	for _, ip := range ips {
+		data = append(data, IP{ip})
+	}
+	jsonData, err := json.MarshalIndent(data, "", " ")
+	if err != nil {
+		return err
+	}
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.Write(jsonData)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func outputCSV(ips []string, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	for _, ip := range ips {
+		writer.Write([]string{ip})
+	}
+
+	return nil
+}
+
+func outputTerminal(ips []string) {
+	for _, ip := range ips {
+		fmt.Println(ip)
+	}
 }
