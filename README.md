@@ -16,7 +16,7 @@ So whether you're a network administrator or just curious about IP addresses, CI
 Clone the repository and build the tool using the following commands:
 
 ```console
-git clone https://github.com/your_username/cidr-sensei.git
+git clone https://github.com/ozfive/cidr-sensei.git
 cd cidr-sensei
 go build -o cidr-sensei cmd/cidr-sensei/main.go
 ```
