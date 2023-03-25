@@ -14,7 +14,7 @@ PLATFORMS=darwin/amd64 dragonfly/amd64 freebsd/amd64 freebsd/386 freebsd/arm64 l
 
 # Set the name of the output file for each platform
 define output_file
-	$(BUILD_DIR)/$(PROGRAM)_$(VERSION)_$(1)_$(2)
+	$(BUILD_DIR)/$(PROGRAM)_$(VERSION)_$(1)_$(2)$(if $(findstring windows,$(1)),.exe,)
 endef
 OUTPUTS=$(foreach platform,$(PLATFORMS),$(call output_file,$(word 1,$(subst /, ,$(platform))),$(word 2,$(subst /, ,$(platform)))))
 
