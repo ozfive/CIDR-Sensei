@@ -50,12 +50,12 @@ func uint2ip(ip uint32) net.IP {
 	return result
 }
 
-func cidrToIPsParallel(cidrRanges []CIDRRange, concurrency int) ([]string, error) {
+func cidrToIPsParallelBinarySearch(cidrRanges []CIDRRange, concurrency int) ([]string, error) {
 	var ips []string
 	semaphoreChan := make(chan struct{}, concurrency)
 	ipChan := make(chan []byte, concurrency)
-	var wg sync.WaitGroup
-	var err error
+	errChan := make(chan error, 1) // Channel for sending errors
+
 	// Pre-allocate a pool of byte slices for storing IP addresses
 	ipPool := sync.Pool{
 		New: func() interface{} {
@@ -63,18 +63,13 @@ func cidrToIPsParallel(cidrRanges []CIDRRange, concurrency int) ([]string, error
 		},
 	}
 
-	// Find the index of the last CIDR range that ends before the start of the current CIDR range
-	lastIndex := make([]int, len(cidrRanges))
-	for i := range cidrRanges {
-		if i == 0 {
-			lastIndex[i] = -1
-		} else {
-			lastIndex[i] = sort.Search(i, func(j int) bool {
-				return cidrRanges[j].end >= cidrRanges[i].start
-			}) - 1
-		}
-	}
+	// Sort the CIDR ranges by their starting IPs
+	sort.Slice(cidrRanges, func(i, j int) bool {
+		return cidrRanges[i].start < cidrRanges[j].start
+	})
 
+	// Process each CIDR range in a separate goroutine
+	var wg sync.WaitGroup
 	for i, cidrRange := range cidrRanges {
 		wg.Add(1)
 		go func(cidr CIDRRange, idx int) {
@@ -83,7 +78,11 @@ func cidrToIPsParallel(cidrRanges []CIDRRange, concurrency int) ([]string, error
 			start := cidr.start
 			for i := uint32(0); i < uint32(cidr.length); i++ {
 				ip := uint2ip(start + i)
-				for j := idx; j <= lastIndex[i]; j++ {
+				// Use binary search to find the index of the last CIDR range that contains the current IP
+				lastIndex := sort.Search(len(cidrRanges), func(j int) bool {
+					return cidrRanges[j].end >= ip2uint(ip)
+				}) - 1
+				for j := idx; j <= lastIndex; j++ {
 					if ip2uint(ip) <= cidrRanges[j].end {
 						if value := cidrRanges[j].ipNet.String(); value != "" {
 							ipBytes := ipPool.Get().([]byte)
@@ -98,6 +97,7 @@ func cidrToIPsParallel(cidrRanges []CIDRRange, concurrency int) ([]string, error
 		}(cidrRange, i)
 	}
 
+	// Wait for all goroutines to finish and close the IP channel
 	go func() {
 		wg.Wait()
 		close(ipChan)
@@ -111,11 +111,13 @@ func cidrToIPsParallel(cidrRanges []CIDRRange, concurrency int) ([]string, error
 		ipPool.Put(ipBytes)
 	}
 
-	if err != nil {
+	// Check for any errors
+	select {
+	case err := <-errChan:
 		return nil, err
+	default:
+		return ips, nil
 	}
-
-	return ips, nil
 }
 
 func binarySearch(cidrRanges []CIDRRange, ip uint32) string {
@@ -136,7 +138,7 @@ func binarySearch(cidrRanges []CIDRRange, ip uint32) string {
 
 func cidrToIPs(cidrRanges []CIDRRange, parallel bool, concurrency int) ([]string, error) {
 	if parallel {
-		return cidrToIPsParallel(cidrRanges, concurrency)
+		return cidrToIPsParallelBinarySearch(cidrRanges, concurrency)
 	}
 	return cidrToIPsBinarySearch(cidrRanges)
 }
