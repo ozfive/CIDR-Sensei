@@ -242,6 +242,7 @@ func cidrToIPsParallelIntervalTree(cidrRanges []CIDRRange, concurrency int) ([]s
 	return ips, nil
 }
 
+/*
 func binarySearch(cidrRanges []CIDRRange, ip uint32) string {
 	left := 0
 	right := len(cidrRanges) - 1
@@ -257,26 +258,37 @@ func binarySearch(cidrRanges []CIDRRange, ip uint32) string {
 	}
 	return ""
 }
+*/
 
 func cidrToIPs(cidrRanges []CIDRRange, parallel bool, concurrency int, algorithm string) ([]string, error) {
 	if parallel {
 		if algorithm == "interval-tree" {
 			return cidrToIPsParallelIntervalTree(cidrRanges, concurrency)
+		} else if algorithm == "binary-search" {
+			return cidrToIPsParallelBinarySearch(cidrRanges, concurrency)
+		} else {
+			// Default to binary search
+			return cidrToIPsParallelBinarySearch(cidrRanges, concurrency)
 		}
-		return cidrToIPsParallelBinarySearch(cidrRanges, concurrency)
+	} else {
+		return cidrToIPsBinarySearch(cidrRanges)
 	}
-	return cidrToIPsBinarySearch(cidrRanges)
+
 }
 
 func cidrToIPsBinarySearch(cidrRanges []CIDRRange) ([]string, error) {
 	// Prepare the sorted list of CIDR ranges
 	sortedCIDRRanges := make([]CIDRRange, len(cidrRanges))
+
 	copy(sortedCIDRRanges, cidrRanges)
+
 	sort.Slice(sortedCIDRRanges, func(i, j int) bool {
 		return sortedCIDRRanges[i].start < sortedCIDRRanges[j].start
 	})
+
 	// Expand the CIDR ranges into a list of IPs using binary search to find the region for each IP
 	var ips []string
+
 	for _, cidrRange := range sortedCIDRRanges {
 		for i := uint32(0); i < uint32(cidrRange.length); i++ {
 			ip := uint2ip(cidrRange.start + i)
@@ -288,6 +300,7 @@ func cidrToIPsBinarySearch(cidrRanges []CIDRRange) ([]string, error) {
 			}
 		}
 	}
+
 	return ips, nil
 }
 
