@@ -24,7 +24,7 @@ go build -o cidr-sensei cmd/cidr-sensei/main.go
 # Usage
 
 ```shell
-./cidr-sensei -output json -cidr="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" -parallel -concurrency=100
+./cidr-sensei -output="json" -cidr="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" -parallel -concurrency=100
 
 ```
 You can use the following options:
@@ -35,7 +35,7 @@ You can use the following options:
 
 # Example
 ```console
-./cidr-sensei -output json -cidr="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" -parallel -concurrency=100
+./cidr-sensei -output="json" -cidr="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" -parallel -concurrency=100
 10.0.0.0
 10.0.0.1
 10.0.0.2
