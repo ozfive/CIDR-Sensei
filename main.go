@@ -342,13 +342,13 @@ func main() {
 
 	switch outputFormat {
 	case "json":
-		filename := fmt.Sprintf("ip_%s_%s.json", strings.Replace(cidrListStr, "/", "-", -1), time.Now().Format("2006-01-02T15-04-05"))
+		filename := fmt.Sprintf("ips_%s_%s.csv", strings.ReplaceAll(cidrListStr, "/", "-"), time.Now().Format("2006-01-02T15-04-05"))
 		err = outputJSON(ips, filename)
 		if err != nil {
 			fmt.Printf("Error writing JSON output to file: %v\n", err)
 		}
 	case "csv":
-		filename := fmt.Sprintf("ips_%s_%s.csv", strings.Replace(cidrListStr, "/", "-", -1), time.Now().Format("2006-01-02T15-04-05"))
+		filename := fmt.Sprintf("ips_%s_%s.csv", strings.ReplaceAll(cidrListStr, "/", "-"), time.Now().Format("2006-01-02T15-04-05"))
 		err := outputCSV(ips, filename)
 		if err != nil {
 			fmt.Printf("Error writing CSV file: %v\n", err)
