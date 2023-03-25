@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/binary"
 	"encoding/csv"
 	"encoding/json"
@@ -363,23 +364,40 @@ func outputJSON(ips []string, filename string) error {
 	type IP struct {
 		Address string `json:"address"`
 	}
+
 	var data []IP
 	for _, ip := range ips {
 		data = append(data, IP{ip})
 	}
+
 	jsonData, err := json.MarshalIndent(data, "", " ")
 	if err != nil {
 		return err
 	}
+
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	_, err = file.Write(jsonData)
+
+	defer func() {
+		cerr := file.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
+
+	writer := bufio.NewWriter(file)
+	_, err = writer.Write(jsonData)
 	if err != nil {
 		return err
 	}
+
+	err = writer.Flush()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -388,14 +406,23 @@ func outputCSV(ips []string, filename string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		cerr := file.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
 	for _, ip := range ips {
-		writer.Write([]string{ip})
+		if err := writer.Write([]string{ip}); err != nil {
+			return err
+		}
 	}
+
+	writer.Flush()
 
 	return nil
 }
