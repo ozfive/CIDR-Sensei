@@ -48,7 +48,7 @@ You can use the following options:
 Took 0.372257 seconds to complete.
 ```
 
-The above command will expand the CIDR blocks **10.0.0.0/8**, **172.16.0.0/12**, and **192.168.0.0/16** into a list of IP addresses, using 100 workers for parallel processing.
+The above command will expand the CIDR blocks **10.0.0.0/8**, **172.16.0.0/12**, and **192.168.0.0/16** into a list of IP addresses in a JSON file, using 100 workers for parallel processing.
 
 # Dependencies
 
