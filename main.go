@@ -273,7 +273,6 @@ func cidrToIPs(cidrRanges []CIDRRange, parallel bool, concurrency int, algorithm
 	} else {
 		return cidrToIPsBinarySearch(cidrRanges)
 	}
-
 }
 
 func cidrToIPsBinarySearch(cidrRanges []CIDRRange) ([]string, error) {
