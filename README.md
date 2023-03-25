@@ -20,6 +20,7 @@ git clone https://github.com/your_username/cidr-sensei.git
 cd cidr-sensei
 go build -o cidr-sensei cmd/cidr-sensei/main.go
 ```
+Binary releases are available [HERE](https://github.com/ozfive/CIDR-Sensei/tags).
 
 # Usage
 
