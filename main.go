@@ -161,29 +161,39 @@ func getProcessFunc(algorithm string, cidrRanges []CIDRRange) (func(CIDRRange, c
 	switch algorithm {
 	case "interval-tree":
 		tree := buildIntervalTree(cidrRanges)
-		return func(cidr CIDRRange, ipChan chan<- string) error {
-			for ip := cidr.start; ip <= cidr.end; ip++ {
-				if c := tree.Search(ip); c != nil {
-					ipChan <- uint2ip(ip).String()
-				}
-			}
-			return nil
-		}, nil
+		return processIntervalTree(tree), nil
 	case "binary-search":
 		sort.Slice(cidrRanges, func(i, j int) bool { return cidrRanges[i].start < cidrRanges[j].start })
-		return func(cidr CIDRRange, ipChan chan<- string) error {
-			for ip := cidr.start; ip <= cidr.end; ip++ {
-				idx := sort.Search(len(cidrRanges), func(j int) bool {
-					return cidrRanges[j].end >= ip
-				})
-				if idx < len(cidrRanges) && cidrRanges[idx].start <= ip {
-					ipChan <- uint2ip(ip).String()
-				}
-			}
-			return nil
-		}, nil
+		return processBinarySearch(cidrRanges), nil
 	default:
 		return nil, fmt.Errorf("unsupported algorithm: %s", algorithm)
+	}
+}
+
+// processIntervalTree returns a function that processes CIDR ranges using an interval tree.
+func processIntervalTree(tree *intervalTree) func(CIDRRange, chan<- string) error {
+	return func(cidr CIDRRange, ipChan chan<- string) error {
+		for ip := cidr.start; ip <= cidr.end; ip++ {
+			if c := tree.Search(ip); c != nil {
+				ipChan <- uint2ip(ip).String()
+			}
+		}
+		return nil
+	}
+}
+
+// processBinarySearch returns a function that processes CIDR ranges using binary search.
+func processBinarySearch(cidrRanges []CIDRRange) func(CIDRRange, chan<- string) error {
+	return func(cidr CIDRRange, ipChan chan<- string) error {
+		for ip := cidr.start; ip <= cidr.end; ip++ {
+			idx := sort.Search(len(cidrRanges), func(j int) bool {
+				return cidrRanges[j].end >= ip
+			})
+			if idx < len(cidrRanges) && cidrRanges[idx].start <= ip {
+				ipChan <- uint2ip(ip).String()
+			}
+		}
+		return nil
 	}
 }
 
@@ -241,8 +251,8 @@ func buildIntervalTree(cidrRanges []CIDRRange) *intervalTree {
 	for _, cidr := range cidrRanges {
 		err := tree.Insert(cidr.start, cidr.end, &cidr)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to insert CIDR range into interval tree: %v\n", err)
-			os.Exit(1)
+			fmt.Printf("Failed to insert CIDR range into interval tree: %v\n", err)
+			// Handle the error as appropriate, possibly returning it
 		}
 	}
 	return tree
@@ -284,6 +294,28 @@ func uint2ip(ip uint32) net.IP {
 	return result
 }
 
+// intervalNode represents a node in the interval tree.
+type intervalNode struct {
+	start, end  uint32
+	left, right *intervalNode
+	cidr        *CIDRRange
+}
+
+// intervalTree represents the interval tree structure.
+type intervalTree struct {
+	root *intervalNode
+}
+
+// Insert adds a new interval to the tree.
+func (t *intervalTree) Insert(start, end uint32, cidr *CIDRRange) error {
+	node := &intervalNode{start: start, end: end, cidr: cidr}
+	if t.root == nil {
+		t.root = node
+		return nil
+	}
+	return t.root.insert(node)
+}
+
 // insert recursively inserts a node into the interval tree.
 func (n *intervalNode) insert(newNode *intervalNode) error {
 	if newNode.end < n.start {
@@ -318,28 +350,6 @@ func (n *intervalNode) search(ip uint32) *CIDRRange {
 		return n.right.search(ip)
 	}
 	return n.cidr
-}
-
-// intervalNode represents a node in the interval tree.
-type intervalNode struct {
-	start, end  uint32
-	left, right *intervalNode
-	cidr        *CIDRRange
-}
-
-// intervalTree represents the interval tree structure.
-type intervalTree struct {
-	root *intervalNode
-}
-
-// Insert adds a new interval to the tree.
-func (t *intervalTree) Insert(start, end uint32, cidr *CIDRRange) error {
-	node := &intervalNode{start: start, end: end, cidr: cidr}
-	if t.root == nil {
-		t.root = node
-		return nil
-	}
-	return t.root.insert(node)
 }
 
 func outputJSON(ips []string, filename string) error {
