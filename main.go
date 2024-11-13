@@ -11,9 +11,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -27,42 +29,93 @@ type CIDRRange struct {
 	ipNet  *net.IPNet
 	start  uint32
 	end    uint32
-	length int
+	length uint32
 }
 
-func parseCIDRList(cidrList []string) ([]CIDRRange, error) {
-	cidrRanges := make([]CIDRRange, len(cidrList))
-	for i, cidrStr := range cidrList {
-		_, ipNet, err := net.ParseCIDR(cidrStr)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing CIDR %s: %s", cidrStr, err)
-		}
-		start := ip2uint(ipNet.IP)
-		end := start | ^ip2uint(net.IP(ipNet.Mask))
-		cidrRanges[i] = CIDRRange{ipNet: ipNet, start: start, end: end, length: int(end - start)}
+type Config struct {
+	OutputFormat string
+	CIDRListStr  string
+	Parallel     bool
+	Concurrency  int
+	Algorithm    string
+}
+
+func main() {
+	// Parse flags and handle configuration
+	config, err := parseFlags()
+	if err != nil {
+		fmt.Println("Error: ", err)
+		os.Exit(1)
 	}
-	return cidrRanges, nil
-}
 
-func ip2uint(ip net.IP) uint32 {
-	return binary.BigEndian.Uint32(ip.To4())
-}
+	// Handle OS interrupts
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-func uint2ip(ip uint32) net.IP {
-	result := make(net.IP, 4)
-	binary.BigEndian.PutUint32(result, ip)
-	return result
-}
-
-func buildIntervalTree(cidrRanges []CIDRRange) *intervalTree {
-	tree := &intervalTree{}
-	for _, cidr := range cidrRanges {
-		err := tree.insert(cidr.start, cidr.end, &cidr)
-		if err != nil {
-			log.Fatalf("Failed to insert CIDR range into interval tree: %v", err)
-		}
+	// Parse CIDR list
+	cidrRanges, err := parseCIDRList(strings.Split(config.CIDRListStr, ","))
+	if err != nil {
+		fmt.Printf("Error: %s\n", err)
+		os.Exit(1)
 	}
-	return tree
+
+	// Start processing
+	startTime := time.Now()
+
+	var ips []string
+	if config.Parallel {
+		ips, err = cidrToIPsParallel(ctx, cidrRanges, config.Concurrency, config.Algorithm)
+	} else {
+		ips, err = cidrToIPsBinarySearch(cidrRanges)
+	}
+
+	if err != nil {
+		fmt.Printf("Error: %s\n", err)
+		os.Exit(1)
+	}
+
+	// Handle output
+	err = handleOutput(config.OutputFormat, ips, config.CIDRListStr)
+	if err != nil {
+		fmt.Printf("Error writing output: %v\n", err)
+	}
+
+	fmt.Printf("Took %.2f seconds to complete.\n", time.Since(startTime).Seconds())
+}
+
+func parseFlags() (Config, error) {
+	var config Config
+	flag.StringVar(&config.OutputFormat, "output", "terminal", "the output format (json, csv, or terminal)")
+	flag.StringVar(&config.CIDRListStr, "cidr", "", "a comma-separated list of CIDR blocks to expand into IPs")
+	flag.BoolVar(&config.Parallel, "parallel", false, "enable parallel processing")
+	flag.IntVar(&config.Concurrency, "concurrency", defaultConcurrency, "set the number of workers for parallel processing")
+	flag.StringVar(&config.Algorithm, "algorithm", defaultAlgorithm, "the algorithm to use for expanding CIDR blocks into IPs (binary-search, interval-tree)")
+	flag.Usage = func() {
+		fmt.Printf("Usage: %s [OPTIONS]\n", os.Args[0])
+		fmt.Println("Expand a comma-separated list of CIDR blocks into a list of IPs")
+		fmt.Println("")
+		fmt.Println("Options:")
+		flag.PrintDefaults()
+		fmt.Println("")
+		fmt.Println("Examples:")
+		fmt.Println(helpUsage)
+	}
+	flag.Parse()
+
+	// Validate flags
+	if config.CIDRListStr == "" {
+		return config, fmt.Errorf("the -cidr flag is required")
+	}
+
+	if config.Concurrency <= 0 {
+		config.Concurrency = defaultConcurrency
+	}
+
+	if config.Algorithm != "binary-search" && config.Algorithm != "interval-tree" {
+		config.Algorithm = defaultAlgorithm
+	}
+
+	return config, nil
 }
 
 func cidrToIPsParallel(ctx context.Context, cidrRanges []CIDRRange, concurrency int, algorithm string) ([]string, error) {
@@ -147,84 +200,78 @@ func cidrToIPsParallel(ctx context.Context, cidrRanges []CIDRRange, concurrency 
 	return ips, nil
 }
 
-func cidrToIPsParallelBinarySearch(cidrRanges []CIDRRange, concurrency int) ([]string, error) {
+func cidrToIPsBinarySearch(cidrRanges []CIDRRange) ([]string, error) {
+	// Your existing sequential binary search implementation
+	// Ensure it's optimized and remains after refactoring
 	var ips []string
-	semaphoreChan := make(chan struct{}, concurrency)
-	ipChan := make(chan []byte, concurrency)
-	errChan := make(chan error, 1) // Channel for sending errors
 
-	// Pre-allocate a pool of byte slices for storing IP addresses
-	ipPool := sync.Pool{
-		New: func() interface{} {
-			return make([]byte, 15)
-		},
-	}
-
-	// Sort the CIDR ranges by their starting IPs
-	sort.Slice(cidrRanges, func(i, j int) bool {
-		return cidrRanges[i].start < cidrRanges[j].start
+	// Sort the CIDR ranges by their start IP
+	sortedCIDRRanges := make([]CIDRRange, len(cidrRanges))
+	copy(sortedCIDRRanges, cidrRanges)
+	sort.Slice(sortedCIDRRanges, func(i, j int) bool {
+		return sortedCIDRRanges[i].start < sortedCIDRRanges[j].start
 	})
 
-	// Process each CIDR range in a separate goroutine
-	var wg sync.WaitGroup
-	for i, cidrRange := range cidrRanges {
-		wg.Add(1)
-		go func(cidr CIDRRange, idx int) {
-			defer wg.Done()
-			semaphoreChan <- struct{}{}
-			start := cidr.start
-			for i := uint32(0); i < uint32(cidr.length); i++ {
-				ip := uint2ip(start + i)
-				// Use binary search to find the index of the last CIDR range that contains the current IP
-				lastIndex := sort.Search(len(cidrRanges), func(j int) bool {
-					return cidrRanges[j].end >= ip2uint(ip)
-				}) - 1
-				for j := idx; j <= lastIndex; j++ {
-					if ip2uint(ip) <= cidrRanges[j].end {
-						if value := cidrRanges[j].ipNet.String(); value != "" {
-							ipBytes := ipPool.Get().([]byte)
-							copy(ipBytes, ip.String())
-							ipChan <- ipBytes
-						}
-						break
-					}
-				}
+	// Expand the CIDR ranges into a list of IPs using binary search
+	for _, cidrRange := range sortedCIDRRanges {
+		for i := cidrRange.start; i <= cidrRange.end; i++ {
+			ip := uint2ip(i)
+			idx := sort.Search(len(sortedCIDRRanges), func(j int) bool {
+				return sortedCIDRRanges[j].end >= i
+			})
+			if idx < len(sortedCIDRRanges) && sortedCIDRRanges[idx].start <= i {
+				ips = append(ips, ip.String())
 			}
-			<-semaphoreChan
-		}(cidrRange, i)
+		}
 	}
 
-	// Wait for all goroutines to finish and close the IP channel
-	go func() {
-		wg.Wait()
-		close(ipChan)
-	}()
-
-	// Receive IP addresses from the channel and add them to the result slice
-	for ipBytes := range ipChan {
-		ipString := string(ipBytes)
-		ips = append(ips, ipString)
-		// Put the byte slice back in the pool
-		ipPool.Put(ipBytes)
-	}
-
-	// Check for any errors
-	select {
-	case err := <-errChan:
-		return nil, err
-	default:
-		return ips, nil
-	}
+	return ips, nil
 }
 
-type intervalNode struct {
-	start, end  uint32
-	left, right *intervalNode
-	cidr        *CIDRRange
+func buildIntervalTree(cidrRanges []CIDRRange) *intervalTree {
+	tree := &intervalTree{}
+	for _, cidr := range cidrRanges {
+		err := tree.insert(cidr.start, cidr.end, &cidr)
+		if err != nil {
+			log.Fatalf("failed to insert CIDR range into interval tree: %v", err)
+		}
+	}
+	return tree
 }
 
-type intervalTree struct {
-	root *intervalNode
+func parseCIDRList(cidrList []string) ([]CIDRRange, error) {
+	var cidrRanges []CIDRRange
+	for _, cidrStr := range cidrList {
+		ip, ipNet, err := net.ParseCIDR(cidrStr)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing CIDR %s: %w", cidrStr, err)
+		}
+		start := ipToUint(ip)
+		mask := ipNet.Mask
+		// Calculate the end IP based on the mask
+		end := start | ^ipToUint(net.IP(mask))
+		cidrRanges = append(cidrRanges, CIDRRange{
+			ipNet:  ipNet,
+			start:  start,
+			end:    end,
+			length: end - start + 1,
+		})
+	}
+	return cidrRanges, nil
+}
+
+func ipToUint(ip net.IP) uint32 {
+	ipv4 := ip.To4()
+	if ipv4 == nil {
+		return 0 // Handle IPv6 or invalid IPs appropriately
+	}
+	return binary.BigEndian.Uint32(ipv4)
+}
+
+func uint2ip(ip uint32) net.IP {
+	result := make(net.IP, 4)
+	binary.BigEndian.PutUint32(result, ip)
+	return result
 }
 
 func (t *intervalTree) insert(start, end uint32, cidr *CIDRRange) error {
@@ -235,13 +282,13 @@ func (t *intervalTree) insert(start, end uint32, cidr *CIDRRange) error {
 	}
 	curr := t.root
 	for {
-		if end <= curr.start {
+		if end < curr.start {
 			if curr.left == nil {
 				curr.left = node
 				return nil
 			}
 			curr = curr.left
-		} else if start >= curr.end {
+		} else if start > curr.end {
 			if curr.right == nil {
 				curr.right = node
 				return nil
@@ -269,202 +316,15 @@ func (t *intervalTree) search(ip uint32) *CIDRRange {
 	return nil
 }
 
-func cidrToIPsParallelIntervalTree(cidrRanges []CIDRRange, concurrency int) ([]string, error) {
-	var ips []string
-	semaphoreChan := make(chan struct{}, concurrency)
-	ipChan := make(chan []byte, concurrency)
-	var wg sync.WaitGroup
-	var err error
-
-	// Pre-allocate a pool of byte slices for storing IP addresses
-	ipPool := sync.Pool{
-		New: func() interface{} {
-			return make([]byte, 15)
-		},
-	}
-
-	// Build an interval tree from the CIDR ranges
-	tree := intervalTree{}
-	for _, cidrRange := range cidrRanges {
-		tree.insert(cidrRange.start, cidrRange.end, &cidrRange)
-	}
-
-	for _, cidrRange := range cidrRanges {
-		wg.Add(1)
-
-		go func(cidr CIDRRange) {
-			defer wg.Done()
-
-			semaphoreChan <- struct{}{}
-
-			start := cidr.start
-
-			for i := uint32(0); i < uint32(cidr.length); i++ {
-				ip := start + i
-
-				if c := tree.search(ip); c != nil {
-					if value := c.ipNet.String(); value != "" {
-						ipBytes := ipPool.Get().([]byte)
-
-						copy(ipBytes, uint2ip(ip).String())
-
-						ipChan <- ipBytes
-					}
-				}
-			}
-			<-semaphoreChan
-		}(cidrRange)
-	}
-
-	go func() {
-		wg.Wait()
-		close(ipChan)
-	}()
-
-	// Receive IP addresses from the channel and add them to the result slice
-	for ipBytes := range ipChan {
-		ipString := string(ipBytes)
-		ips = append(ips, ipString)
-
-		// Put the byte slice back in the pool
-		ipPool.Put(ipBytes)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return ips, nil
+// Build an interval tree from the CIDR ranges
+type intervalNode struct {
+	start, end  uint32
+	left, right *intervalNode
+	cidr        *CIDRRange
 }
 
-/*
-func binarySearch(cidrRanges []CIDRRange, ip uint32) string {
-	left := 0
-	right := len(cidrRanges) - 1
-	for left <= right {
-		mid := (left + right) / 2
-		if ip < cidrRanges[mid].start {
-			right = mid - 1
-		} else if ip > cidrRanges[mid].end {
-			left = mid + 1
-		} else {
-			return cidrRanges[mid].ipNet.String()
-		}
-	}
-	return ""
-}
-*/
-
-func cidrToIPs(cidrRanges []CIDRRange, parallel bool, concurrency int, algorithm string) ([]string, error) {
-	if parallel {
-		if algorithm == "interval-tree" {
-			return cidrToIPsParallelIntervalTree(cidrRanges, concurrency)
-		} else if algorithm == "binary-search" {
-			return cidrToIPsParallelBinarySearch(cidrRanges, concurrency)
-		} else {
-			// Default to binary search
-			return cidrToIPsParallelBinarySearch(cidrRanges, concurrency)
-		}
-	} else {
-		return cidrToIPsBinarySearch(cidrRanges)
-	}
-}
-
-func cidrToIPsBinarySearch(cidrRanges []CIDRRange) ([]string, error) {
-	// Prepare the sorted list of CIDR ranges
-	sortedCIDRRanges := make([]CIDRRange, len(cidrRanges))
-
-	copy(sortedCIDRRanges, cidrRanges)
-
-	sort.Slice(sortedCIDRRanges, func(i, j int) bool {
-		return sortedCIDRRanges[i].start < sortedCIDRRanges[j].start
-	})
-
-	// Expand the CIDR ranges into a list of IPs using binary search to find the region for each IP
-	var ips []string
-
-	for _, cidrRange := range sortedCIDRRanges {
-		for i := uint32(0); i < uint32(cidrRange.length); i++ {
-			ip := uint2ip(cidrRange.start + i)
-			idx := sort.Search(len(sortedCIDRRanges), func(j int) bool {
-				return sortedCIDRRanges[j].end >= ip2uint(ip)
-			})
-			if idx < len(sortedCIDRRanges) && sortedCIDRRanges[idx].start <= ip2uint(ip) {
-				ips = append(ips, ip.String())
-			}
-		}
-	}
-
-	return ips, nil
-}
-
-func main() {
-	var outputFormat string
-	var cidrListStr string
-	var parallel bool
-	var concurrency int
-	var algorithm string
-
-	flag.StringVar(&outputFormat, "output", "terminal", "the output format (json, csv, or terminal)")
-	flag.StringVar(&cidrListStr, "cidr", "", "a comma-separated list of CIDR blocks to expand into IPs")
-	flag.BoolVar(&parallel, "parallel", false, "enable parallel processing")
-	flag.IntVar(&concurrency, "concurrency", defaultConcurrency, "set the number of workers for parallel processing")
-	flag.StringVar(&algorithm, "algorithm", defaultAlgorithm, "the algorithm to use for expanding CIDR blocks into IPs (binary-search, interval-tree)")
-	flag.Usage = func() {
-		fmt.Printf("Usage: %s [OPTIONS]\n", os.Args[0])
-		fmt.Println("Expand a comma-separated list of CIDR blocks into a list of IPs")
-		fmt.Println("")
-		fmt.Println("Options:")
-		flag.PrintDefaults()
-		fmt.Println("")
-		fmt.Println("Examples:")
-		fmt.Println(helpUsage)
-	}
-
-	flag.Parse()
-
-	if cidrListStr == "" {
-		fmt.Println("Error: -cidr is required.")
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	cidrList := strings.Split(cidrListStr, ",")
-	startTime := time.Now()
-	cidrRanges, err := parseCIDRList(cidrList)
-
-	if err != nil {
-		fmt.Printf("Error: %s\n", err)
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	ips, err := cidrToIPs(cidrRanges, parallel, concurrency, algorithm)
-
-	if err != nil {
-		fmt.Printf("Error: %s\n", err)
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	switch outputFormat {
-	case "json":
-		filename := fmt.Sprintf("ips_%s_%s.csv", strings.ReplaceAll(cidrListStr, "/", "-"), time.Now().Format("2006-01-02T15-04-05"))
-		err = outputJSON(ips, filename)
-		if err != nil {
-			fmt.Printf("Error writing JSON output to file: %v\n", err)
-		}
-	case "csv":
-		filename := fmt.Sprintf("ips_%s_%s.csv", strings.ReplaceAll(cidrListStr, "/", "-"), time.Now().Format("2006-01-02T15-04-05"))
-		err := outputCSV(ips, filename)
-		if err != nil {
-			fmt.Printf("Error writing CSV file: %v\n", err)
-		}
-	default:
-		outputTerminal(ips)
-	}
-
-	fmt.Printf("Took %v seconds to complete.\n", time.Since(startTime).Seconds())
+type intervalTree struct {
+	root *intervalNode
 }
 
 func outputJSON(ips []string, filename string) error {
@@ -477,7 +337,7 @@ func outputJSON(ips []string, filename string) error {
 		data = append(data, IP{ip})
 	}
 
-	jsonData, err := json.MarshalIndent(data, "", " ")
+	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -500,12 +360,7 @@ func outputJSON(ips []string, filename string) error {
 		return err
 	}
 
-	err = writer.Flush()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return writer.Flush()
 }
 
 func outputCSV(ips []string, filename string) error {
@@ -529,13 +384,27 @@ func outputCSV(ips []string, filename string) error {
 		}
 	}
 
-	writer.Flush()
-
 	return nil
 }
 
 func outputTerminal(ips []string) {
 	for _, ip := range ips {
 		fmt.Println(ip)
+	}
+}
+
+func handleOutput(format string, ips []string, cidrListStr string) error {
+	switch format {
+	case "json":
+		filename := fmt.Sprintf("ips_%s_%s.json", strings.ReplaceAll(cidrListStr, "/", "-"), time.Now().Format("2006-01-02T15-04-05"))
+		return outputJSON(ips, filename)
+	case "csv":
+		filename := fmt.Sprintf("ips_%s_%s.csv", strings.ReplaceAll(cidrListStr, "/", "-"), time.Now().Format("2006-01-02T15-04-05"))
+		return outputCSV(ips, filename)
+	case "terminal":
+		outputTerminal(ips)
+		return nil
+	default:
+		return fmt.Errorf("unsupported output format: %s", format)
 	}
 }
