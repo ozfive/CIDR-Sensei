@@ -130,7 +130,6 @@ func cidrToIPsParallel(ctx context.Context, cidrRanges []CIDRRange, concurrency 
 	case "interval-tree":
 		tree := buildIntervalTree(cidrRanges)
 		processFunc = func(cidr CIDRRange, out chan<- string, errs chan<- error) {
-			defer wg.Done()
 			for ip := cidr.start; ip <= cidr.end; ip++ {
 				select {
 				case <-ctx.Done():
@@ -145,7 +144,7 @@ func cidrToIPsParallel(ctx context.Context, cidrRanges []CIDRRange, concurrency 
 	case "binary-search":
 		sort.Slice(cidrRanges, func(i, j int) bool { return cidrRanges[i].start < cidrRanges[j].start })
 		processFunc = func(cidr CIDRRange, out chan<- string, errs chan<- error) {
-			defer wg.Done()
+			_ = errs // Explicitly ignore the errs parameter
 			for ip := cidr.start; ip <= cidr.end; ip++ {
 				select {
 				case <-ctx.Done():
@@ -166,7 +165,7 @@ func cidrToIPsParallel(ctx context.Context, cidrRanges []CIDRRange, concurrency 
 
 	// Start worker goroutines
 	for i := 0; i < concurrency; i++ {
-		wg.Add(i)
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for _, cidr := range cidrRanges {
