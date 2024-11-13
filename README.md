@@ -1,5 +1,6 @@
 # CIDR-Sensei
 [![DeepSource](https://app.deepsource.com/gh/ozfive/CIDR-Sensei.svg/?label=active+issues&show_trend=true&token=_FFNSjcgffdEw4DWcLU42oRJ)](https://app.deepsource.com/gh/ozfive/CIDR-Sensei/) [![DeepSource](https://app.deepsource.com/gh/ozfive/CIDR-Sensei.svg/?label=resolved+issues&show_trend=true&token=_FFNSjcgffdEw4DWcLU42oRJ)](https://app.deepsource.com/gh/ozfive/CIDR-Sensei/)
+
 CIDR-Sensei is a command-line tool that expands a comma-separated list of CIDR blocks into a list of IP addresses. It supports both sequential and parallel processing.
 # Implementation
 
