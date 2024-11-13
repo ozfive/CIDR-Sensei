@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -118,85 +117,94 @@ func parseFlags() (Config, error) {
 	return config, nil
 }
 
+// cidrToIPsParallel expands CIDR ranges into IPs using parallel processing.
 func cidrToIPsParallel(ctx context.Context, cidrRanges []CIDRRange, concurrency int, algorithm string) ([]string, error) {
-	var ips []string
+	ips := make([]string, 0)
 	ipChan := make(chan string, 1000)
 	errChan := make(chan error, 1)
 	var wg sync.WaitGroup
 
-	// Define the processing function based on the algorithm
-	var processFunc func(CIDRRange, chan<- string, chan<- error)
-	switch algorithm {
-	case "interval-tree":
-		tree := buildIntervalTree(cidrRanges)
-		processFunc = func(cidr CIDRRange, out chan<- string, errs chan<- error) {
-			for ip := cidr.start; ip <= cidr.end; ip++ {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					if c := tree.search(ip); c != nil {
-						out <- uint2ip(ip).String()
-					}
-				}
-			}
-		}
-	case "binary-search":
-		sort.Slice(cidrRanges, func(i, j int) bool { return cidrRanges[i].start < cidrRanges[j].start })
-		processFunc = func(cidr CIDRRange, out chan<- string, errs chan<- error) {
-			_ = errs // Explicitly ignore the errs parameter
-			for ip := cidr.start; ip <= cidr.end; ip++ {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					idx := sort.Search(len(cidrRanges), func(j int) bool {
-						return cidrRanges[j].end >= ip
-					})
-					if idx < len(cidrRanges) && cidrRanges[idx].start <= ip {
-						out <- uint2ip(ip).String()
-					}
-				}
-			}
-		}
-	default:
-		return nil, fmt.Errorf("unsupported algorithm: %s", algorithm)
+	// Determine the processing function based on the algorithm.
+	processFunc, err := getProcessFunc(algorithm, cidrRanges)
+	if err != nil {
+		return nil, err
 	}
 
-	// Start worker goroutines
+	// Start worker goroutines.
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for _, cidr := range cidrRanges {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					processFunc(cidr, ipChan, errChan)
-				}
-			}
-		}()
+		go worker(ctx, &wg, cidrRanges, processFunc, ipChan, errChan)
 	}
 
-	// Close channels once all workers are done
+	// Close channels once all workers are done.
 	go func() {
 		wg.Wait()
 		close(ipChan)
 		close(errChan)
 	}()
 
-	// Collect IPs from the channel
+	// Collect IPs from the channel.
 	for ip := range ipChan {
 		ips = append(ips, ip)
 	}
 
-	// Check for errors
+	// Check for errors.
 	if err, ok := <-errChan; ok {
 		return nil, err
 	}
 
 	return ips, nil
+}
+
+// getProcessFunc returns the appropriate processing function based on the algorithm.
+func getProcessFunc(algorithm string, cidrRanges []CIDRRange) (func(CIDRRange, chan<- string) error, error) {
+	switch algorithm {
+	case "interval-tree":
+		tree := buildIntervalTree(cidrRanges)
+		return func(cidr CIDRRange, ipChan chan<- string) error {
+			for ip := cidr.start; ip <= cidr.end; ip++ {
+				if c := tree.Search(ip); c != nil {
+					ipChan <- uint2ip(ip).String()
+				}
+			}
+			return nil
+		}, nil
+	case "binary-search":
+		sort.Slice(cidrRanges, func(i, j int) bool { return cidrRanges[i].start < cidrRanges[j].start })
+		return func(cidr CIDRRange, ipChan chan<- string) error {
+			for ip := cidr.start; ip <= cidr.end; ip++ {
+				idx := sort.Search(len(cidrRanges), func(j int) bool {
+					return cidrRanges[j].end >= ip
+				})
+				if idx < len(cidrRanges) && cidrRanges[idx].start <= ip {
+					ipChan <- uint2ip(ip).String()
+				}
+			}
+			return nil
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported algorithm: %s", algorithm)
+	}
+}
+
+// worker processes CIDR ranges and sends IPs to the ipChan.
+func worker(ctx context.Context, wg *sync.WaitGroup, cidrRanges []CIDRRange, processFunc func(CIDRRange, chan<- string) error, ipChan chan<- string, errChan chan<- error) {
+	defer wg.Done()
+	for _, cidr := range cidrRanges {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			err := processFunc(cidr, ipChan)
+			if err != nil {
+				select {
+				case errChan <- err:
+				default:
+				}
+				return
+			}
+		}
+	}
 }
 
 func cidrToIPsBinarySearch(cidrRanges []CIDRRange) ([]string, error) {
@@ -227,12 +235,14 @@ func cidrToIPsBinarySearch(cidrRanges []CIDRRange) ([]string, error) {
 	return ips, nil
 }
 
+// buildIntervalTree constructs an interval tree from CIDR ranges.
 func buildIntervalTree(cidrRanges []CIDRRange) *intervalTree {
 	tree := &intervalTree{}
 	for _, cidr := range cidrRanges {
-		err := tree.insert(cidr.start, cidr.end, &cidr)
+		err := tree.Insert(cidr.start, cidr.end, &cidr)
 		if err != nil {
-			log.Fatalf("failed to insert CIDR range into interval tree: %v", err)
+			fmt.Fprintf(os.Stderr, "Failed to insert CIDR range into interval tree: %v\n", err)
+			os.Exit(1)
 		}
 	}
 	return tree
@@ -267,63 +277,69 @@ func ipToUint(ip net.IP) uint32 {
 	return binary.BigEndian.Uint32(ipv4)
 }
 
+// uint2ip converts a uint32 IP to net.IP.
 func uint2ip(ip uint32) net.IP {
 	result := make(net.IP, 4)
 	binary.BigEndian.PutUint32(result, ip)
 	return result
 }
 
-func (t *intervalTree) insert(start, end uint32, cidr *CIDRRange) error {
-	node := &intervalNode{start: start, end: end, cidr: cidr}
-	if t.root == nil {
-		t.root = node
+// insert recursively inserts a node into the interval tree.
+func (n *intervalNode) insert(newNode *intervalNode) error {
+	if newNode.end < n.start {
+		if n.left == nil {
+			n.left = newNode
+			return nil
+		}
+		return n.left.insert(newNode)
+	} else if newNode.start > n.end {
+		if n.right == nil {
+			n.right = newNode
+			return nil
+		}
+		return n.right.insert(newNode)
+	}
+	return fmt.Errorf("overlapping intervals are not supported: [%d, %d] overlaps with [%d, %d]", newNode.start, newNode.end, n.start, n.end)
+}
+
+// Search finds the CIDRRange containing the given IP.
+func (t *intervalTree) Search(ip uint32) *CIDRRange {
+	return t.root.search(ip)
+}
+
+// search recursively searches for the IP in the interval tree.
+func (n *intervalNode) search(ip uint32) *CIDRRange {
+	if n == nil {
 		return nil
 	}
-	curr := t.root
-	for {
-		if end < curr.start {
-			if curr.left == nil {
-				curr.left = node
-				return nil
-			}
-			curr = curr.left
-		} else if start > curr.end {
-			if curr.right == nil {
-				curr.right = node
-				return nil
-			}
-			curr = curr.right
-		} else {
-			return fmt.Errorf("overlapping intervals are not supported: [%d, %d] overlaps with [%d, %d]", start, end, curr.start, curr.end)
-		}
+	if ip < n.start {
+		return n.left.search(ip)
+	} else if ip > n.end {
+		return n.right.search(ip)
 	}
+	return n.cidr
 }
 
-func (t *intervalTree) search(ip uint32) *CIDRRange {
-	curr := t.root
-
-	for curr != nil {
-		if ip < curr.start {
-			curr = curr.left
-		} else if ip > curr.end {
-			curr = curr.right
-		} else {
-			return curr.cidr
-		}
-	}
-
-	return nil
-}
-
-// Build an interval tree from the CIDR ranges
+// intervalNode represents a node in the interval tree.
 type intervalNode struct {
 	start, end  uint32
 	left, right *intervalNode
 	cidr        *CIDRRange
 }
 
+// intervalTree represents the interval tree structure.
 type intervalTree struct {
 	root *intervalNode
+}
+
+// Insert adds a new interval to the tree.
+func (t *intervalTree) Insert(start, end uint32, cidr *CIDRRange) error {
+	node := &intervalNode{start: start, end: end, cidr: cidr}
+	if t.root == nil {
+		t.root = node
+		return nil
+	}
+	return t.root.insert(node)
 }
 
 func outputJSON(ips []string, filename string) error {
