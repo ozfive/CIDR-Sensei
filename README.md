@@ -1,6 +1,17 @@
 # CIDR-Sensei
 [![DeepSource](https://app.deepsource.com/gh/ozfive/CIDR-Sensei.svg/?label=active+issues&show_trend=true&token=_FFNSjcgffdEw4DWcLU42oRJ)](https://app.deepsource.com/gh/ozfive/CIDR-Sensei/) [![DeepSource](https://app.deepsource.com/gh/ozfive/CIDR-Sensei.svg/?label=resolved+issues&show_trend=true&token=_FFNSjcgffdEw4DWcLU42oRJ)](https://app.deepsource.com/gh/ozfive/CIDR-Sensei/)
 
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=bugs)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
+[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
+[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
+[![Technical Debt](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=sqale_index)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
+[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
+
 CIDR-Sensei is a command-line tool that expands a comma-separated list of CIDR blocks into a list of IP addresses. It supports both sequential and parallel processing.
 # Implementation
 
