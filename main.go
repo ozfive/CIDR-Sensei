@@ -252,7 +252,6 @@ func buildIntervalTree(cidrRanges []CIDRRange) *intervalTree {
 		err := tree.Insert(cidr.start, cidr.end, &cidr)
 		if err != nil {
 			fmt.Printf("Failed to insert CIDR range into interval tree: %v\n", err)
-			// Handle the error as appropriate, possibly returning it
 		}
 	}
 	return tree

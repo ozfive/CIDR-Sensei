@@ -74,4 +74,4 @@ The above command will expand the CIDR blocks **10.0.0.0/8**, **172.16.0.0/12**,
 
 # Dependencies
 
-*   Go v1.16 or later
+*   Go v1.23.2
