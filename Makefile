@@ -1,9 +1,21 @@
 # Makefile
 
+# Set a help target for this makefile
+help:
+	@echo "Available targets:"
+	@echo "  all                Build for all platforms (default)"
+	@echo "  clean              Remove the build directory"
+	@echo "  build-<OS>-<ARCH>  Build for a specific OS and Architecture"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make all VERSION=1.2.3"
+	@echo "  make build-linux-amd64 VERSION=1.2.3"
+	@echo "  make clean"
+
 # Get the version from the command-line argument or set it to 0.0.1
 VERSION ?= 0.0.1
 
-# Set the name of your program
+# Set the name of the program
 PROGRAM=CIDR-Sensei
 
 # Set the directory where the program will be built
