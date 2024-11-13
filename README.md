@@ -13,17 +13,24 @@
 [![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=ozfive_CIDR-Sensei&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=ozfive_CIDR-Sensei)
 
 CIDR-Sensei is a command-line tool that expands a comma-separated list of CIDR blocks into a list of IP addresses. It supports both sequential and parallel processing.
-# Implementation
 
-CIDR-Sensei is a tool written in Go that helps you easily expand a list of CIDR blocks into a list of IP addresses. With the -concurrency flag, you can run the program in parallel to speed up the expansion process.
+## **Implementation**
 
-To use it, simply provide a comma-separated list of CIDR blocks to the -cidr flag, and CIDR-Sensei will do the rest. It first parses the list and stores the start and end IP addresses of each CIDR block in a slice of CIDRRange structs.
+CIDR-Sensei is a tool written in Go that helps you easily expand a list of CIDR blocks into a list of IP addresses. With the `-concurrency` flag, you can run the program in parallel to speed up the expansion process while minimizing memory usage.
 
-Next, it expands the CIDR blocks into a list of IP addresses. It can do this in two ways: either by using a binary search to find the CIDR block that contains each IP address, or by splitting the CIDR blocks into smaller chunks and processing each chunk in parallel. This release includes binary search and now interval tree as algorithms to choose from by using the -algorithm flag on the command line. The resulting list of IP addresses are directed to the terminal, CSV, or JSON with the 'output' option.
+To use it, simply provide a comma-separated list of CIDR blocks to the `-cidr` flag, and CIDR-Sensei will do the rest. It first parses the list and stores the start and end IP addresses of each CIDR block in a slice of `CIDRRange` structs.
+
+Next, it expands the CIDR blocks into a list of IP addresses. It can do this in two ways: either by using a binary search to find the CIDR block that contains each IP address or by utilizing an interval tree for efficient range queries. This release includes both binary search and interval tree algorithms, selectable via the `-algorithm` flag. The resulting list of IP addresses are streamed directly to the terminal, CSV, or JSON with the `-output` option.
+
+### **Benefits:**
+
+- **Lower Memory Usage:** Streams IP addresses directly to the output, avoiding the need to store them all in memory.
+- **Enhanced Performance:** Potentially faster processing as it eliminates the overhead of appending to a large slice.
+- **Flexible Output:** Supports JSON, CSV, and terminal outputs, catering to various use cases.
 
 So whether you're a network administrator or just curious about IP addresses, CIDR-Sensei has got you covered!
 
-# Installation
+## **Installation**
 
 Clone the repository and build the tool using the following commands:
 
@@ -32,6 +39,7 @@ git clone https://github.com/your_username/cidr-sensei.git
 cd cidr-sensei
 go build -o cidr-sensei cmd/cidr-sensei/main.go
 ```
+
 Binary releases are available [HERE](https://github.com/ozfive/CIDR-Sensei/tags) for many platforms.
 
 # Usage
